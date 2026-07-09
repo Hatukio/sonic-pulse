@@ -7,7 +7,12 @@ import {
   JarvisConsole,
   patchSettings,
 } from '../public/src/ui/jarvis-console.mjs';
-import { restoreDesktopLyrics } from '../public/src/app.mjs';
+import {
+  assistantProviderText,
+  backgroundModeText,
+  buildAssistantActionItems,
+  restoreDesktopLyrics,
+} from '../public/src/app.mjs';
 
 const root = new URL('../', import.meta.url);
 
@@ -30,16 +35,29 @@ test('Arc Theatre shell includes real library, transport, MV, desktop, performan
     'desktopLyricsToggle', 'desktopLayoutButton', 'desktopLyricsLock', 'desktopPresetCenter',
     'desktopPresetBottom', 'desktopPresetLeft', 'desktopPresetRight', 'frameRateControls',
     'qualityControls', 'rendererStatus',
-    'mouseStatus', 'keyboardStatus', 'gestureStatus', 'restoreDefaults',
+    'backgroundMode', 'wallpaperEngineStatus', 'wallpaperSelect', 'wallpaperRefreshButton',
+    'wallpaperApplyButton',
+    'surfaceMode', 'surfaceClickThroughToggle', 'surfaceOpacity',
+    'jarvisCompanion', 'assistantListenButton', 'assistantProvider', 'assistantModel',
+    'assistantEndpoint', 'assistantApiKey', 'assistantMood', 'assistantVoiceInput',
+    'assistantVoiceOutput', 'assistantWeather', 'assistantWeatherButton', 'assistantWeatherStatus',
+    'assistantPromptInput', 'assistantSendButton',
+    'assistantReply', 'assistantActions',
+    'mouseStatus', 'keyboardStatus', 'gestureStatus', 'gestureToggleButton',
+    'gestureCameraPreview', 'restoreDefaults',
   ]) {
     assert.match(html, new RegExp(`id=["']${id}["']`), `missing #${id}`);
   }
-  assert.match(html, /id=["']gestureStatus["'][^>]*>[^<]*未来可用/i);
+  assert.match(html, /id=["']gestureStatus["'][^>]*>[^<]*(待授权|未启用|已启用)/i);
+  assert.match(html, /id=["']assistantWeatherButton["'][\s\S]*自动定位天气/i);
   assert.match(html, /id=["']mvLayer["'][^>]*\bmuted\b[^>]*\bplaysinline\b/i);
   assert.match(html, /id=["']gpuLoad["']/);
-  for (const source of ['visual', 'lyrics', 'mv', 'desktop', 'performance']) {
+  for (const source of ['visual', 'background', 'surface', 'assistant', 'lyrics', 'mv', 'desktop', 'performance']) {
     assert.match(html, new RegExp(`data-subsystem-status=["']${source}["']`), `missing ${source} status row`);
   }
+  assert.match(html, /data-surface-mode=["']immersive["']/);
+  assert.match(html, /data-hud-click-through=["']false["']/);
+  assert.doesNotMatch(html, /id=["']assistantApiKey["'][^>]+data-setting=/);
 });
 
 test('P0 shell exposes provider selector and cross-platform planned sources', async () => {
@@ -48,6 +66,10 @@ test('P0 shell exposes provider selector and cross-platform planned sources', as
   for (const provider of ['netease', 'qq', 'qishui', 'apple']) {
     assert.match(html, new RegExp(`data-provider=["']${provider}["']`), `missing provider ${provider}`);
   }
+  assert.match(html, /data-provider=["']qq["'][^>]*(data-provider-state=["']needs-auth["']|aria-disabled=["']false["'])/);
+  assert.match(html, /data-provider=["']qishui["'][^>]*(data-provider-state=["']needs-auth["']|aria-disabled=["']false["'])/);
+  assert.doesNotMatch(html, /data-provider=["']qq["'][^>]*\sdisabled\b/);
+  assert.doesNotMatch(html, /data-provider=["']qishui["'][^>]*\sdisabled\b/);
   assert.match(html, /data-platform=["']windows-macos["']/);
 });
 
@@ -62,6 +84,7 @@ test('A方案 exposes a persistent glass vinyl shelf and richer playback actions
   }
   assert.match(html, /aria-label=["']当前播放队列黑胶唱片架["']/);
   assert.match(html, /data-shelf-mode=["']vinyl["']/);
+  assert.match(html, /data-background-mode=["']sonic["']/);
   assert.match(html, /data-play-mode=["']sequence["']/);
 });
 
@@ -76,8 +99,9 @@ test('Arc Theatre stylesheet defines interactive, async, responsive, and reduced
 test('A方案 stylesheet defines glass vinyl shelf, aurora backdrop, and Jarvis glass tokens', async () => {
   const css = await readFile(new URL('public/styles/arc-theatre.css', root), 'utf8');
   for (const token of [
-    '--glass-blur: 28px',
+    '--glass-blur: 38px',
     '.aurora-field',
+    '.ambient-depth-field',
     '.vinyl-shelf',
     '.vinyl-record',
     '.playback-actions',
@@ -87,6 +111,14 @@ test('A方案 stylesheet defines glass vinyl shelf, aurora backdrop, and Jarvis 
     '.desktop-preset-grid',
     '.quality-segmented',
     '.provider-strip',
+    '.wallpaper-actions',
+    '.jarvis-companion',
+    '.assistant-prompt-line',
+    '.assistant-actions',
+    '.assistant-weather-row',
+    '.gesture-camera-panel',
+    '[data-surface-mode="transparent"]',
+    '[data-hud-click-through="true"]',
     '.command-rail::before',
     'backdrop-filter: blur(var(--glass-blur))',
   ]) {
@@ -105,6 +137,36 @@ test('patchSettings updates one setting path immutably and frame labels remain h
   assert.equal(settings.visual.form, 'artwork');
   assert.equal(formatFrameRate('unlocked'), 'UNLOCKED');
   assert.equal(formatFrameRate(120), '120 FPS');
+  assert.equal(backgroundModeText('wallpaperEngine'), 'Wallpaper Engine');
+  assert.equal(assistantProviderText('doubao'), '豆包 / 火山方舟');
+});
+
+test('AI Companion prioritizes Chinese model providers before generic OpenAI-compatible setup', async () => {
+  const html = await readFile(new URL('public/index.html', root), 'utf8');
+  const providerBlock = html.match(/id=["']assistantProvider["'][\s\S]*?<\/select>/)?.[0] || '';
+  const order = ['value="local"', 'value="doubao"', 'value="qwen"', 'value="deepseek"', 'value="ollama"', 'value="lmstudio"', 'value="openaiCompatible"'];
+  let cursor = -1;
+  for (const token of order) {
+    const next = providerBlock.indexOf(token);
+    assert.ok(next > cursor, `provider ${token} should appear after previous provider`);
+    cursor = next;
+  }
+  assert.match(providerBlock, /豆包/);
+  assert.match(providerBlock, /通义千问/);
+  assert.match(providerBlock, /DeepSeek/);
+});
+
+test('assistant action normalizer exposes safe search chips for recommendation payloads', () => {
+  assert.deepEqual(buildAssistantActionItems({
+    recommendations: [{ title: '雨夜 Lo-fi', query: '雨夜 Lo-fi R&B' }],
+    actions: [
+      { type: 'search', label: '搜索推荐音乐', keyword: '雨夜 Lo-fi R&B' },
+      { type: 'open-url', label: 'bad', url: 'https://example.com' },
+      { type: 'search', label: 'too long', keyword: 'x'.repeat(160) },
+    ],
+  }), [
+    { type: 'search', label: '搜索推荐音乐', keyword: '雨夜 Lo-fi R&B' },
+  ]);
 });
 
 class FakeControl {

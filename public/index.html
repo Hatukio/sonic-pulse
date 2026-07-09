@@ -11,7 +11,7 @@
   </script>
 </head>
 <body>
-  <div class="app-shell" id="appShell" data-library-open="false" data-console-open="false" data-shelf-mode="vinyl" data-play-mode="sequence" data-lyrics-visible="true" data-window-mode="standard" data-platform="windows-macos">
+  <div class="app-shell" id="appShell" data-library-open="false" data-console-open="false" data-shelf-mode="vinyl" data-play-mode="sequence" data-lyrics-visible="true" data-window-mode="standard" data-background-mode="sonic" data-surface-mode="immersive" data-hud-click-through="false" data-platform="windows-macos">
     <!-- Legacy handoff audit marker retained for migration tests only:
       function draw(){ requestAnimationFrame(draw); if(document.body.classList.contains('three-ready')) return; const W=window.innerWidth
       window.__sonicPulseAudioGraph={audio,context:audioCtx,analyser,source:audioSrc,data:dataArray}
@@ -32,6 +32,7 @@
       <canvas id="visualStage" aria-label="专辑三维点云可视化"></canvas>
       <video id="mvLayer" muted playsinline crossorigin="anonymous" aria-label="官方音乐视频"></video>
       <div class="aurora-field" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div class="ambient-depth-field" aria-hidden="true"><i></i><i></i><i></i></div>
       <div class="stage-vignette" aria-hidden="true"></div>
       <div id="lyricStage" class="lyric-stage" aria-live="polite" aria-atomic="true">
         <p class="lyric-context" data-lyric="previous"></p>
@@ -39,6 +40,16 @@
         <p class="lyric-translation" data-lyric="translation"></p>
         <p class="lyric-context" data-lyric="next"></p>
       </div>
+      <section id="jarvisCompanion" class="jarvis-companion" aria-live="polite" aria-label="Jarvis 语音音乐陪伴">
+        <button id="assistantListenButton" class="jarvis-voice-button" type="button" aria-pressed="false" aria-label="启动 Jarvis 语音输入">
+          <span aria-hidden="true"></span>
+        </button>
+        <div class="jarvis-companion-copy">
+          <span class="micro-label">JARVIS VOICE</span>
+          <strong id="assistantStatusText">本地陪伴待命</strong>
+          <p id="assistantTranscript">点击说话，我会根据时间、心情和播放状态推荐音乐。</p>
+        </div>
+      </section>
     </main>
 
     <aside id="vinylShelf" class="vinyl-shelf" aria-label="当前播放队列黑胶唱片架">
@@ -66,8 +77,8 @@
       </div>
       <div id="providerStrip" class="provider-strip" data-platform="windows-macos" aria-label="音乐平台来源">
         <button type="button" data-provider="netease" aria-pressed="true"><span>网易云</span><small>LIVE</small></button>
-        <button type="button" data-provider="qq" aria-pressed="false" disabled><span>QQ</span><small>NEXT</small></button>
-        <button type="button" data-provider="qishui" aria-pressed="false" disabled><span>汽水</span><small>NEXT</small></button>
+        <button type="button" data-provider="qq" data-provider-state="needs-auth" aria-pressed="false" aria-disabled="false"><span>QQ</span><small>AUTH</small></button>
+        <button type="button" data-provider="qishui" data-provider-state="needs-auth" aria-pressed="false" aria-disabled="false"><span>汽水</span><small>AUTH</small></button>
         <button type="button" data-provider="apple" aria-pressed="false" disabled><span>Apple</span><small>API</small></button>
       </div>
       <form class="search-line" id="searchForm" role="search">
@@ -102,7 +113,7 @@
       </div>
 
       <div class="console-deck">
-      <details class="console-group console-card" open>
+      <details class="console-group console-card">
         <summary><span>01</span> VISUAL CORE</summary>
         <div class="console-body">
           <p class="subsystem-status" data-subsystem-status="visual" data-status="loading">视觉核心启动中</p>
@@ -117,7 +128,58 @@
       </details>
 
       <details class="console-group console-card" open>
-        <summary><span>02</span> LYRICS</summary>
+        <summary><span>02</span> BACKGROUND</summary>
+        <div class="console-body">
+          <p class="subsystem-status" data-subsystem-status="background" data-status="ready">Sonic 动态背景已启用</p>
+          <label class="control-line"><span>背景来源</span><select id="backgroundMode" data-setting="background.mode"><option value="sonic">Sonic 动态场</option><option value="wallpaperEngine">Wallpaper Engine</option><option value="localVideo">本地视频</option><option value="web">Web 动态页</option></select></label>
+          <div class="data-line"><span>Wallpaper Engine</span><strong id="wallpaperEngineStatus">检测中</strong></div>
+          <label class="control-line"><span>已安装壁纸</span><select id="wallpaperSelect" aria-label="选择 Wallpaper Engine 壁纸"><option value="">等待扫描</option></select></label>
+          <div class="wallpaper-actions">
+            <button class="action-line" id="wallpaperRefreshButton" type="button">扫描壁纸</button>
+            <button class="action-line" id="wallpaperApplyButton" type="button">应用到桌面</button>
+          </div>
+          <p class="inline-warning" id="wallpaperHint">Windows 将调用 Wallpaper Engine 官方命令；macOS 使用 Sonic 内置动态背景兜底。</p>
+        </div>
+      </details>
+
+      <details class="console-group console-card" open>
+        <summary><span>03</span> SURFACE HUD</summary>
+        <div class="console-body">
+          <p class="subsystem-status" data-subsystem-status="surface" data-status="ready">沉浸玻璃窗口</p>
+          <label class="control-line"><span>窗口表面</span><select id="surfaceMode" data-setting="surface.mode"><option value="immersive">Sonic 沉浸舞台</option><option value="transparent">透明 HUD 叠层</option></select></label>
+          <label class="switch-line" for="surfaceClickThroughToggle"><span>透明时点击穿透</span><input id="surfaceClickThroughToggle" data-setting="surface.clickThrough" type="checkbox" role="switch"></label>
+          <label class="range-line" for="surfaceOpacity"><span>玻璃不透明度</span><output data-output-for="surfaceOpacity">0.82</output></label><input id="surfaceOpacity" data-setting="surface.opacity" type="range" min="0.15" max="1" step="0.01">
+          <p class="inline-warning" id="surfaceHint">透明 HUD 下可用 Cmd/Ctrl + Shift + H 取回窗口控制。</p>
+        </div>
+      </details>
+
+      <details class="console-group console-card">
+        <summary><span>04</span> AI COMPANION</summary>
+        <div class="console-body">
+          <p class="subsystem-status" data-subsystem-status="assistant" data-status="ready">Sonic 本地陪伴可用</p>
+          <label class="control-line"><span>模型来源</span><select id="assistantProvider" data-setting="assistant.provider"><option value="local">Sonic 本地陪伴 · 免费</option><option value="doubao">豆包 / 火山方舟</option><option value="qwen">通义千问 / 百炼</option><option value="deepseek">DeepSeek</option><option value="ollama">Ollama 本地模型</option><option value="lmstudio">LM Studio 本地模型</option><option value="openaiCompatible">OpenAI-compatible 自定义</option></select></label>
+          <label class="control-line text-control"><span>模型</span><input id="assistantModel" data-setting="assistant.model" type="text" autocomplete="off" placeholder="doubao / qwen-plus / deepseek"></label>
+          <label class="control-line text-control"><span>服务地址</span><input id="assistantEndpoint" data-setting="assistant.endpoint" type="url" autocomplete="off" placeholder="https://ark.cn-beijing.volces.com/api/v3"></label>
+          <label class="control-line text-control"><span>用户 API Key</span><input id="assistantApiKey" type="password" autocomplete="off" placeholder="仅本次会话使用，不保存"></label>
+          <label class="control-line"><span>心情模式</span><select id="assistantMood" data-setting="assistant.mood"><option value="auto">自动感知</option><option value="calm">平静</option><option value="focus">专注</option><option value="tired">疲惫</option><option value="happy">开心</option><option value="sad">低落</option><option value="night">夜晚</option></select></label>
+          <div class="assistant-weather-row">
+            <label class="control-line text-control"><span>天气/环境</span><input id="assistantWeather" data-setting="assistant.weather" type="text" autocomplete="off" placeholder="自动定位后填入，如：小雨 18℃"></label>
+            <button class="action-line" id="assistantWeatherButton" type="button">自动定位天气</button>
+          </div>
+          <p class="inline-warning" id="assistantWeatherStatus">按用户地区定位判断天气；只保存天气摘要，不保存经纬度。</p>
+          <label class="switch-line" for="assistantVoiceInput"><span>语音输入</span><input id="assistantVoiceInput" data-setting="assistant.voiceInput" type="checkbox" role="switch"></label>
+          <label class="switch-line" for="assistantVoiceOutput"><span>语音陪伴</span><input id="assistantVoiceOutput" data-setting="assistant.voiceOutput" type="checkbox" role="switch"></label>
+          <div class="assistant-prompt-line">
+            <input id="assistantPromptInput" type="text" autocomplete="off" placeholder="比如：今晚我有点累，推荐适合写代码的歌">
+            <button class="action-line" id="assistantSendButton" type="button">询问 Jarvis</button>
+          </div>
+          <div class="assistant-actions" id="assistantActions" aria-label="Jarvis 推荐动作"></div>
+          <p class="assistant-reply" id="assistantReply">默认走本地免费模式；Ollama / LM Studio 需要用户本机启动模型服务。</p>
+        </div>
+      </details>
+
+      <details class="console-group console-card">
+        <summary><span>05</span> LYRICS</summary>
         <div class="console-body">
           <p class="subsystem-status" data-subsystem-status="lyrics" data-status="ready">等待歌曲歌词</p>
           <label class="control-line"><span>表现方式</span><select id="lyricStyle" data-setting="lyrics.style"><option value="auto">随节奏自动</option><option value="depth">景深聚焦</option><option value="orbit">轨道排列</option><option value="particles">粒子成形</option><option value="energy">能量字体</option></select></label>
@@ -127,8 +189,8 @@
         </div>
       </details>
 
-      <details class="console-group console-card" open>
-        <summary><span>03</span> OFFICIAL MV</summary>
+      <details class="console-group console-card">
+        <summary><span>06</span> OFFICIAL MV</summary>
         <div class="console-body">
           <p class="subsystem-status" data-subsystem-status="mv" data-status="ready">等待歌曲</p>
           <div class="data-line"><span>可用状态</span><strong id="mvAvailability">等待歌曲</strong></div>
@@ -139,7 +201,7 @@
       </details>
 
       <details class="console-group console-card">
-        <summary><span>04</span> DESKTOP LYRICS</summary>
+        <summary><span>07</span> DESKTOP LYRICS</summary>
         <div class="console-body">
           <p class="subsystem-status" data-subsystem-status="desktop" data-status="ready">桌面歌词待命</p>
           <label class="switch-line" for="desktopLyricsToggle"><span>桌面歌词</span><input id="desktopLyricsToggle" data-setting="desktopLyrics.enabled" type="checkbox" role="switch"></label>
@@ -157,8 +219,8 @@
         </div>
       </details>
 
-      <details class="console-group console-card" open>
-        <summary><span>05</span> PERFORMANCE</summary>
+      <details class="console-group console-card">
+        <summary><span>08</span> PERFORMANCE</summary>
         <div class="console-body">
           <p class="subsystem-status" data-subsystem-status="performance" data-status="loading">正在采样帧率</p>
           <div id="frameRateControls" class="segmented" aria-label="动画帧率">
@@ -183,11 +245,16 @@
       </details>
 
       <details class="console-group console-card">
-        <summary><span>06</span> INPUT</summary>
+        <summary><span>09</span> INPUT</summary>
         <div class="console-body">
           <div class="data-line"><span>鼠标</span><strong id="mouseStatus">待命</strong></div>
           <div class="data-line"><span>键盘</span><strong id="keyboardStatus">待命</strong></div>
-          <div class="data-line disabled"><span>手势摄像头</span><strong id="gestureStatus">未来可用</strong></div>
+          <div class="data-line"><span>手势摄像头</span><strong id="gestureStatus">待授权</strong></div>
+          <div class="gesture-camera-panel">
+            <button class="action-line" id="gestureToggleButton" type="button" aria-pressed="false">启用摄像头手势</button>
+            <video id="gestureCameraPreview" muted playsinline aria-label="摄像头手势本地预览"></video>
+          </div>
+          <p class="inline-warning">本地识别左右挥动切歌、上下挥动调音量；画面不会上传。</p>
         </div>
       </details>
       </div>

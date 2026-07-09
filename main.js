@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen } = require('electron');
 const path = require('path');
 const { fork } = require('child_process');
 const http = require('http');
@@ -8,6 +8,11 @@ const {
   sanitizeDesktopLyricState,
 } = require('./desktop-lyrics-state');
 const { waitForServer } = require('./server-health');
+const {
+  buildStatus: buildWallpaperEngineStatus,
+  openWallpaper: openWallpaperEngineFile,
+  scanLibrary: scanWallpaperEngineLibrary,
+} = require('./wallpaper-engine');
 
 const PORT = 19527;
 const DESKTOP_PLACEMENTS = new Set(['center', 'bottom', 'left', 'right']);
@@ -17,6 +22,7 @@ let serverChild = null;
 let desktopLyricsLayoutMode = false;
 let desktopLyricsBounds = null;
 let desktopLyricState = sanitizeDesktopLyricState({});
+let hudState = { surfaceMode: 'immersive', clickThrough: false, alwaysOnTop: false };
 
 function liveWindow(window) {
   return window && !window.isDestroyed();
@@ -245,7 +251,9 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280, height: 800, minWidth: 960, minHeight: 620,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    backgroundColor: '#05050a',
+    backgroundColor: '#00000000',
+    transparent: true,
+    hasShadow: true,
     show: false,
     webPreferences: {
       nodeIntegration: false,
@@ -262,6 +270,23 @@ function createWindow() {
   mainWindow.loadURL(`http://localhost:${PORT}`);
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.on('closed', () => { mainWindow = null; });
+}
+
+function applyHudState(next = {}) {
+  hudState = {
+    surfaceMode: next.surfaceMode === 'transparent' ? 'transparent' : 'immersive',
+    clickThrough: Boolean(next.clickThrough),
+    alwaysOnTop: Boolean(next.alwaysOnTop || next.surfaceMode === 'transparent'),
+  };
+  if (liveWindow(mainWindow)) {
+    mainWindow.setIgnoreMouseEvents(hudState.clickThrough, { forward: true });
+    try {
+      mainWindow.setAlwaysOnTop(hudState.alwaysOnTop, hudState.alwaysOnTop ? 'floating' : 'normal');
+      mainWindow.setVisibleOnAllWorkspaces(hudState.surfaceMode === 'transparent', { visibleOnFullScreen: true });
+    } catch (_error) {}
+    mainWindow.webContents.send('hud:state', hudState);
+  }
+  return { ok: true, ...hudState };
 }
 
 // ─── IPC：打开登录窗口，提取 Cookie ──────────────────────────────
@@ -411,11 +436,49 @@ ipcMain.handle('desktop-lyrics:state', async (event, nextState) => {
   return { ok: true };
 });
 
+ipcMain.handle('hud:set-state', async (event, nextState = {}) => {
+  requireSender(event, mainWindow);
+  return applyHudState(nextState);
+});
+
+ipcMain.handle('hud:get-state', async (event) => {
+  requireSender(event, mainWindow);
+  return { ok: true, ...hudState };
+});
+
+// ─── IPC：Wallpaper Engine 背景控制（Windows）────────────────────
+ipcMain.handle('wallpaper-engine:status', async (event) => {
+  requireSender(event, mainWindow);
+  return buildWallpaperEngineStatus();
+});
+
+ipcMain.handle('wallpaper-engine:scan', async (event) => {
+  requireSender(event, mainWindow);
+  const status = buildWallpaperEngineStatus();
+  return {
+    status,
+    ...scanWallpaperEngineLibrary(status),
+  };
+});
+
+ipcMain.handle('wallpaper-engine:open', async (event, filePath) => {
+  requireSender(event, mainWindow);
+  const status = buildWallpaperEngineStatus();
+  return openWallpaperEngineFile(filePath, status);
+});
+
 // ─── 应用生命周期 ─────────────────────────────────────────────────
 app.whenReady()
   .then(async () => {
     await startServer();
     createWindow();
+    globalShortcut.register('CommandOrControl+Shift+H', () => {
+      applyHudState({ ...hudState, clickThrough: false });
+      if (liveWindow(mainWindow)) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
     app.on('activate', () => { if (!mainWindow) createWindow(); });
   })
   .catch(error => {
@@ -426,6 +489,7 @@ app.whenReady()
   });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', () => {
+  globalShortcut.unregisterAll();
   if (liveWindow(desktopLyricsWindow)) desktopLyricsWindow.destroy();
   stopServer();
 });

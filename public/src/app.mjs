@@ -12,6 +12,16 @@ import {
 } from './core/performance-governor.mjs';
 import { LyricEngine } from './lyrics/lyric-engine.mjs';
 import { MVController } from './media/mv-controller.mjs';
+import {
+  buildOpenMeteoForecastUrl,
+  formatWeatherSummary,
+  requestCurrentPosition,
+} from './assistant/weather-context.mjs';
+import {
+  classifyMotionGesture,
+  createMotionSampler,
+  gestureToCommand,
+} from './input/gesture-controller.mjs';
 import { JarvisConsole, formatFrameRate } from './ui/jarvis-console.mjs';
 import { SceneEngine } from './visual/scene-engine.mjs';
 import { VisualConductor } from './visual/visual-conductor.mjs';
@@ -24,7 +34,7 @@ export const STATUS = Object.freeze({
 });
 
 const VALID_STATUS = new Set(Object.values(STATUS));
-const VALID_STATUS_SOURCES = new Set(['visual', 'lyrics', 'mv', 'desktop', 'performance', 'system']);
+const VALID_STATUS_SOURCES = new Set(['visual', 'background', 'surface', 'assistant', 'lyrics', 'mv', 'desktop', 'performance', 'system']);
 
 export function normalizeSubsystemReport(report = {}) {
   const valid = VALID_STATUS_SOURCES.has(report.source) && VALID_STATUS.has(report.status);
@@ -120,6 +130,62 @@ export function moveQueueItem(queue = [], fromIndex = -1, toIndex = -1) {
   const [item] = next.splice(from, 1);
   next.splice(to, 0, item);
   return next;
+}
+
+export function backgroundModeText(mode) {
+  return {
+    sonic: 'Sonic 动态场',
+    wallpaperEngine: 'Wallpaper Engine',
+    localVideo: '本地视频',
+    web: 'Web 动态页',
+  }[mode] || 'Sonic 动态场';
+}
+
+export function assistantProviderText(provider) {
+  return {
+    local: 'Sonic 本地陪伴',
+    doubao: '豆包 / 火山方舟',
+    qwen: '通义千问 / 阿里云百炼',
+    deepseek: 'DeepSeek',
+    ollama: 'Ollama 本地模型',
+    lmstudio: 'LM Studio 本地模型',
+    openaiCompatible: 'OpenAI-compatible 自定义',
+  }[provider] || 'Sonic 本地陪伴';
+}
+
+export const ASSISTANT_PROVIDER_DEFAULTS = Object.freeze({
+  local: { model: 'sonic-local-companion', endpoint: '' },
+  doubao: { model: 'doubao-1-5-pro-32k-250115', endpoint: 'https://ark.cn-beijing.volces.com/api/v3' },
+  qwen: { model: 'qwen-plus', endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  deepseek: { model: 'deepseek-v4-flash', endpoint: 'https://api.deepseek.com' },
+  ollama: { model: 'llama3.2', endpoint: 'http://127.0.0.1:11434' },
+  lmstudio: { model: 'local-model', endpoint: 'http://127.0.0.1:1234/v1' },
+  openaiCompatible: { model: 'user-selected-model', endpoint: 'https://api.example.com/v1' },
+});
+
+const ONLINE_ASSISTANT_PROVIDERS = new Set(['doubao', 'qwen', 'deepseek', 'openaiCompatible']);
+
+export function buildAssistantActionItems(payload = {}) {
+  const seen = new Set();
+  const result = [];
+  const add = action => {
+    if (action?.type !== 'search') return;
+    const keyword = String(action.keyword || '').replace(/\s+/g, ' ').trim();
+    if (!keyword || keyword.length > 80 || seen.has(keyword)) return;
+    seen.add(keyword);
+    result.push({
+      type: 'search',
+      label: String(action.label || '搜索推荐音乐').replace(/\s+/g, ' ').trim().slice(0, 24) || '搜索推荐音乐',
+      keyword,
+    });
+  };
+  (Array.isArray(payload.actions) ? payload.actions : []).forEach(add);
+  (Array.isArray(payload.recommendations) ? payload.recommendations : []).forEach(item => add({
+    type: 'search',
+    label: item?.title ? `搜索 ${item.title}` : '搜索推荐音乐',
+    keyword: item?.query || item?.title,
+  }));
+  return result.slice(0, 3);
 }
 
 const hasInlineMV = song => Boolean(song?.mv || song?.mvId || song?.mvid || song?.officialMV || song?.mvAvailable);
@@ -329,7 +395,7 @@ export function startImmersiveApp({ documentRef = globalThis.document, windowRef
 
   const nodes = Object.fromEntries([
     'libraryRail','libraryToggle','libraryClose','energyCore','topFrameRate','playbackFps','systemStatus',
-    'loginButton','logoutButton','accountName','accountDot','searchForm','searchInput','likedButton',
+    'loginButton','logoutButton','accountName','accountDot','providerStrip','searchForm','searchInput','likedButton',
     'playlistList','trackList','libraryMessage','localAudio','trackTitle','trackArtist','trackArtwork',
     'artworkFallback','nowPlayingMVBadge','playButton','previousButton','nextButton','seekInput',
     'elapsedTime','durationTime','volumeInput','desktopLyricsToggle','desktopLayoutButton',
@@ -337,6 +403,13 @@ export function startImmersiveApp({ documentRef = globalThis.document, windowRef
     'desktopPresetLeft','desktopPresetRight','mvToggle','restoreDefaults','toast','vinylShelfCount',
     'vinylShelfList','vinylShelfEmpty','favoriteButton','playModeButton','playModeLabel',
     'lyricsToggleButton','immersiveButton','windowModeButton','moreActionsButton','playbackMorePopover',
+    'backgroundMode','wallpaperEngineStatus','wallpaperSelect','wallpaperRefreshButton','wallpaperApplyButton',
+    'wallpaperHint','surfaceMode','surfaceClickThroughToggle','surfaceOpacity','surfaceHint',
+    'jarvisCompanion','assistantListenButton','assistantStatusText','assistantTranscript',
+    'assistantProvider','assistantModel','assistantEndpoint','assistantApiKey','assistantMood','assistantWeather',
+    'assistantWeatherButton','assistantWeatherStatus',
+    'assistantVoiceInput','assistantVoiceOutput','assistantPromptInput','assistantSendButton','assistantReply','assistantActions',
+    'gestureStatus','gestureToggleButton','gestureCameraPreview',
   ].map(id => [id, documentRef.getElementById(id)]));
 
   let queue = [];
@@ -356,6 +429,16 @@ export function startImmersiveApp({ documentRef = globalThis.document, windowRef
   let latestRenderMs = null;
   let animationFrame = 0;
   let dragQueueIndex = -1;
+  let wallpaperItems = [];
+  let assistantSessionApiKey = '';
+  let assistantRecognition = null;
+  let surfaceHydrated = false;
+  let gestureStream = null;
+  let gestureSampler = null;
+  let gestureFrame = 0;
+  let gestureCooldownUntil = 0;
+  let gestureCanvas = null;
+  const gestureSamples = [];
   const favoriteIds = new Set();
   const mvAvailableIds = new Set();
   const inputTimers = { mouse: 0, keyboard: 0 };
@@ -405,6 +488,282 @@ export function startImmersiveApp({ documentRef = globalThis.document, windowRef
     return settings;
   }
 
+  const setWallpaperMessage = (message, status = STATUS.READY) => {
+    if (nodes.wallpaperEngineStatus) nodes.wallpaperEngineStatus.textContent = message;
+    report({ source: 'background', status, message, recoverable: true });
+  };
+
+  const renderWallpaperOptions = (items = []) => {
+    wallpaperItems = Array.isArray(items) ? items : [];
+    nodes.wallpaperSelect?.replaceChildren();
+    const placeholder = documentRef.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = wallpaperItems.length ? '选择一个已安装壁纸' : '未发现可用壁纸';
+    nodes.wallpaperSelect?.append(placeholder);
+    wallpaperItems.forEach(item => {
+      const option = documentRef.createElement('option');
+      option.value = item.file;
+      option.textContent = `${item.title || '未命名壁纸'} · ${item.type || 'file'}`;
+      nodes.wallpaperSelect?.append(option);
+    });
+    if (settings.background.wallpaperEngine.selectedFile) {
+      nodes.wallpaperSelect.value = settings.background.wallpaperEngine.selectedFile;
+    }
+  };
+
+  const applyBackgroundPresentation = () => {
+    shell.dataset.backgroundMode = settings.background.mode;
+    const hint = backgroundModeText(settings.background.mode);
+    if (nodes.wallpaperHint) {
+      nodes.wallpaperHint.textContent = settings.background.mode === 'wallpaperEngine'
+        ? 'Windows 将调用 Wallpaper Engine 官方命令；如果未安装，则自动保留 Sonic 动态背景。'
+        : `${hint} 已作为播放器背景策略；Wallpaper Engine 仍可单独应用到 Windows 桌面。`;
+    }
+  };
+
+  const applySurfacePresentation = previous => {
+    const surface = settings.surface || DEFAULT_SETTINGS.surface;
+    const effectiveClickThrough = surface.mode === 'transparent' && surface.clickThrough;
+    shell.dataset.surfaceMode = surface.mode;
+    shell.dataset.hudClickThrough = String(Boolean(effectiveClickThrough));
+    shell.style.setProperty('--surface-opacity', String(surface.opacity));
+    if (nodes.surfaceHint) {
+      nodes.surfaceHint.textContent = surface.mode === 'transparent'
+        ? '透明 HUD 已准备；开启点击穿透后用 Cmd/Ctrl + Shift + H 取回控制。'
+        : '沉浸舞台会保留 Sonic 深色玻璃背景；透明 HUD 适合叠在用户壁纸上。';
+    }
+    const unchanged = previous && previous.surface?.mode === surface.mode && previous.surface?.clickThrough === surface.clickThrough;
+    if (surfaceHydrated && unchanged) return;
+    surfaceHydrated = true;
+    const api = windowRef.electronAPI?.hud;
+    if (!api?.setState) {
+      if (surface.mode === 'transparent' || surface.clickThrough) {
+        report({ source: 'surface', status: STATUS.DEGRADED, message: '透明 HUD 需在桌面应用中生效', recoverable: true });
+      }
+      return;
+    }
+    api.setState({
+      surfaceMode: surface.mode,
+      clickThrough: effectiveClickThrough,
+      alwaysOnTop: surface.mode === 'transparent',
+    }).then(result => {
+      shell.dataset.hudClickThrough = String(Boolean(result?.clickThrough));
+      report({
+        source: 'surface',
+        status: STATUS.READY,
+        message: result?.surfaceMode === 'transparent' ? '透明 HUD 已同步到窗口' : '沉浸玻璃窗口',
+        recoverable: true,
+      });
+    }).catch(error => {
+      report({ source: 'surface', status: STATUS.ERROR, message: error.message || 'HUD 同步失败', recoverable: true });
+      toast(error.message || 'HUD 同步失败', true);
+    });
+  };
+
+  const assistantDefaultsFor = provider => ASSISTANT_PROVIDER_DEFAULTS[provider] || ASSISTANT_PROVIDER_DEFAULTS.local;
+
+  const syncAssistantHints = () => {
+    const provider = settings.assistant.provider;
+    const defaults = assistantDefaultsFor(provider);
+    if (nodes.assistantEndpoint) nodes.assistantEndpoint.placeholder = defaults.endpoint || '本地免费模式无需服务地址';
+    if (nodes.assistantModel) nodes.assistantModel.placeholder = defaults.model;
+    const onlineProvider = ONLINE_ASSISTANT_PROVIDERS.has(provider);
+    if (nodes.assistantApiKey) {
+      nodes.assistantApiKey.disabled = !onlineProvider;
+      nodes.assistantApiKey.placeholder = onlineProvider ? '仅本次会话使用，不保存' : '本地 Provider 不需要 Key';
+    }
+    const message = provider === 'local'
+      ? 'Sonic 本地陪伴可用，不调用云端模型'
+      : provider === 'doubao'
+        ? '豆包 / 火山方舟需要用户自己的 API Key'
+        : provider === 'qwen'
+          ? '通义千问 / 百炼需要用户自己的 API Key'
+          : provider === 'deepseek'
+            ? 'DeepSeek 需要用户自己的 API Key'
+            : provider === 'ollama'
+              ? '请先在本机启动 Ollama 模型服务'
+              : provider === 'lmstudio'
+                ? '请先在 LM Studio 启动本地 Server'
+                : '自定义在线模型需要用户自己的 API Key';
+    report({
+      source: 'assistant',
+      status: onlineProvider && !assistantSessionApiKey ? STATUS.DEGRADED : STATUS.READY,
+      message,
+      recoverable: true,
+    });
+    if (nodes.assistantStatusText) nodes.assistantStatusText.textContent = assistantProviderText(provider);
+  };
+
+  const assistantContext = () => ({
+    mood: settings.assistant.mood,
+    date: new Date().toLocaleDateString('zh-CN'),
+    time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+    weather: settings.assistant.weather || '未知天气',
+    currentSong: currentSong?.name || '尚未播放歌曲',
+    artist: artistText(currentSong),
+    playbackState: audio.paused ? 'paused' : 'playing',
+  });
+
+  const renderAssistantActions = payload => {
+    const actions = buildAssistantActionItems(payload);
+    nodes.assistantActions?.replaceChildren();
+    if (!actions.length) {
+      nodes.assistantActions?.setAttribute('hidden', '');
+      return actions;
+    }
+    nodes.assistantActions?.removeAttribute('hidden');
+    actions.forEach(action => {
+      const button = documentRef.createElement('button');
+      button.type = 'button';
+      button.className = 'assistant-action-chip';
+      button.dataset.assistantAction = action.type;
+      button.dataset.keyword = action.keyword;
+      button.textContent = action.label;
+      nodes.assistantActions?.append(button);
+    });
+    return actions;
+  };
+
+  const speakAssistant = text => {
+    const content = String(text || '').trim();
+    if (!content || !settings.assistant.voiceOutput || !windowRef.speechSynthesis) return false;
+    try {
+      windowRef.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(content.slice(0, 360));
+      utterance.lang = 'zh-CN';
+      utterance.rate = 0.96;
+      utterance.pitch = 0.92;
+      windowRef.speechSynthesis.speak(utterance);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const setAssistantBusy = busy => {
+    if (nodes.assistantSendButton) nodes.assistantSendButton.disabled = busy;
+    nodes.assistantListenButton?.setAttribute('aria-pressed', String(Boolean(busy)));
+    nodes.jarvisCompanion?.classList.toggle('is-thinking', Boolean(busy));
+  };
+
+  const askAssistant = async prompt => {
+    const message = String(prompt || nodes.assistantPromptInput?.value || '').trim() || '根据现在的状态推荐音乐';
+    if (nodes.assistantTranscript) nodes.assistantTranscript.textContent = message;
+    setAssistantBusy(true);
+    report({ source: 'assistant', status: STATUS.LOADING, message: 'Jarvis 正在判断音乐氛围', recoverable: true });
+    try {
+      const payload = await safeJson(await windowRef.fetch('/api/assistant/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: settings.assistant.provider,
+          model: settings.assistant.model,
+          endpoint: settings.assistant.endpoint,
+          apiKey: ONLINE_ASSISTANT_PROVIDERS.has(settings.assistant.provider) ? assistantSessionApiKey : '',
+          message,
+          context: assistantContext(),
+        }),
+      }));
+      const text = payload.text || payload.speak || '我在，但这次没有拿到有效回复。';
+      if (nodes.assistantReply) nodes.assistantReply.textContent = text;
+      if (nodes.assistantStatusText) nodes.assistantStatusText.textContent = `${assistantProviderText(payload.provider || settings.assistant.provider)} · 已回应`;
+      report({ source: 'assistant', status: STATUS.READY, message: `${assistantProviderText(payload.provider || settings.assistant.provider)} 已回应`, recoverable: true });
+      renderAssistantActions(payload);
+      speakAssistant(payload.speak || text);
+      return payload;
+    } catch (error) {
+      const messageText = error.message || 'Jarvis 暂时不可用';
+      if (nodes.assistantReply) nodes.assistantReply.textContent = messageText;
+      renderAssistantActions(null);
+      report({ source: 'assistant', status: STATUS.ERROR, message: messageText, recoverable: true });
+      toast(messageText, true);
+      return null;
+    } finally {
+      setAssistantBusy(false);
+    }
+  };
+
+  const startAssistantListening = () => {
+    if (!settings.assistant.voiceInput) {
+      toast('请先开启语音输入', true);
+      return;
+    }
+    const SpeechRecognition = windowRef.SpeechRecognition || windowRef.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      const fallback = '当前运行环境不支持语音识别，可先使用文字输入。';
+      if (nodes.assistantTranscript) nodes.assistantTranscript.textContent = fallback;
+      report({ source: 'assistant', status: STATUS.DEGRADED, message: fallback, recoverable: true });
+      return;
+    }
+    if (assistantRecognition) {
+      assistantRecognition.stop();
+      assistantRecognition = null;
+      return;
+    }
+    assistantRecognition = new SpeechRecognition();
+    assistantRecognition.lang = 'zh-CN';
+    assistantRecognition.interimResults = false;
+    assistantRecognition.continuous = false;
+    nodes.assistantListenButton?.setAttribute('aria-pressed', 'true');
+    nodes.jarvisCompanion?.classList.add('is-listening');
+    report({ source: 'assistant', status: STATUS.LOADING, message: '正在听你说话', recoverable: true });
+    assistantRecognition.onresult = event => {
+      const transcript = Array.from(event.results || [])
+        .map(result => result?.[0]?.transcript)
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      if (transcript) {
+        if (nodes.assistantPromptInput) nodes.assistantPromptInput.value = transcript;
+        askAssistant(transcript);
+      }
+    };
+    assistantRecognition.onerror = event => {
+      const errorMessage = event?.error ? `语音识别失败：${event.error}` : '语音识别失败';
+      report({ source: 'assistant', status: STATUS.DEGRADED, message: errorMessage, recoverable: true });
+      if (nodes.assistantTranscript) nodes.assistantTranscript.textContent = errorMessage;
+    };
+    assistantRecognition.onend = () => {
+      assistantRecognition = null;
+      nodes.assistantListenButton?.setAttribute('aria-pressed', 'false');
+      nodes.jarvisCompanion?.classList.remove('is-listening');
+      syncAssistantHints();
+    };
+    assistantRecognition.start();
+  };
+
+  const refreshWallpaperEngine = async ({ scan = true } = {}) => {
+    const api = windowRef.electronAPI?.wallpaperEngine;
+    if (!api) {
+      renderWallpaperOptions([]);
+      setWallpaperMessage('浏览器模式不可用', STATUS.DEGRADED);
+      return null;
+    }
+    setWallpaperMessage(scan ? '正在扫描壁纸' : '正在检测', STATUS.LOADING);
+    try {
+      const status = await api.status();
+      if (!status.available) {
+        renderWallpaperOptions([]);
+        const message = status.platform === 'win32' ? '未安装 Wallpaper Engine' : '当前系统不支持桌面控制';
+        setWallpaperMessage(message, STATUS.DEGRADED);
+        return status;
+      }
+      if (!scan) {
+        setWallpaperMessage('已检测到 Wallpaper Engine', STATUS.READY);
+        return status;
+      }
+      const payload = await api.scan();
+      renderWallpaperOptions(payload.items || []);
+      setWallpaperMessage(payload.count ? `发现 ${payload.count} 个壁纸` : '未发现已安装壁纸', payload.count ? STATUS.READY : STATUS.DEGRADED);
+      return payload;
+    } catch (error) {
+      renderWallpaperOptions([]);
+      setWallpaperMessage(error.message || 'Wallpaper Engine 检测失败', STATUS.ERROR);
+      toast(error.message || 'Wallpaper Engine 检测失败', true);
+      return null;
+    }
+  };
+
   const applySettings = (candidate, persist = true) => {
     const previous = settings;
     settings = persist ? saveSettings(candidate, settingsStorage) : normalizeSettings(candidate);
@@ -418,6 +777,9 @@ export function startImmersiveApp({ documentRef = globalThis.document, windowRef
     lyricStage.style.setProperty('--lyric-intensity', String(settings.lyrics.intensity));
     nodes.topFrameRate.textContent = formatFrameRate(settings.performance.frameRate);
     nodes.playbackFps.textContent = formatFrameRate(settings.performance.frameRate);
+    applyBackgroundPresentation();
+    applySurfacePresentation(previous);
+    syncAssistantHints();
     updatePlaybackActionState();
     renderLyricState(lyricStage, lyricEngine.state, settings);
     if (previous.desktopLyrics.enabled !== settings.desktopLyrics.enabled) {
@@ -443,6 +805,44 @@ export function startImmersiveApp({ documentRef = globalThis.document, windowRef
     }
     if (settings.desktopLyrics.enabled) sendDesktopState(lyricEngine.state, { motionPhase: 0, audioEnergy: 0 });
     return settings;
+  };
+
+  const setAssistantWeatherStatus = (message, status = STATUS.READY) => {
+    if (nodes.assistantWeatherStatus) {
+      nodes.assistantWeatherStatus.textContent = message;
+      nodes.assistantWeatherStatus.dataset.status = status;
+    }
+  };
+
+  const refreshAssistantWeather = async () => {
+    if (nodes.assistantWeatherButton) nodes.assistantWeatherButton.disabled = true;
+    setAssistantWeatherStatus('正在请求系统定位权限…', STATUS.LOADING);
+    try {
+      const position = await requestCurrentPosition(windowRef.navigator);
+      const url = buildOpenMeteoForecastUrl(position.coords);
+      setAssistantWeatherStatus('正在读取当前位置天气…', STATUS.LOADING);
+      const payload = await safeJson(await windowRef.fetch(url));
+      const summary = formatWeatherSummary(payload);
+      applySettings({
+        ...settings,
+        assistant: {
+          ...settings.assistant,
+          weather: summary,
+        },
+      });
+      if (nodes.assistantWeather) nodes.assistantWeather.value = summary;
+      setAssistantWeatherStatus('已按当前位置更新天气，只保存天气摘要。', STATUS.READY);
+      toast(`天气已更新：${summary}`);
+      return summary;
+    } catch (error) {
+      const message = error?.message || '自动天气不可用，请手动填写天气/环境';
+      setAssistantWeatherStatus(message, STATUS.DEGRADED);
+      report({ source: 'assistant', status: STATUS.DEGRADED, message, recoverable: true });
+      toast(message, true);
+      return null;
+    } finally {
+      if (nodes.assistantWeatherButton) nodes.assistantWeatherButton.disabled = false;
+    }
   };
 
   const sendDesktopState = (state, motion = {}) => {
@@ -489,7 +889,22 @@ export function startImmersiveApp({ documentRef = globalThis.document, windowRef
       windowRef.clearTimeout(qualityHoldTimer);
       qualityHoldTimer = windowRef.setTimeout(() => { qualityAutoHold = false; }, 12000);
     }
-    applySettings(event.detail.settings);
+    let nextSettings = event.detail.settings;
+    if (event.detail.path === 'assistant.provider') {
+      const defaults = assistantDefaultsFor(event.detail.value);
+      const previousDefaults = Object.values(ASSISTANT_PROVIDER_DEFAULTS);
+      const shouldReplaceModel = previousDefaults.some(item => item.model === settings.assistant.model) || !settings.assistant.model;
+      const shouldReplaceEndpoint = previousDefaults.some(item => item.endpoint && item.endpoint === settings.assistant.endpoint) || !settings.assistant.endpoint;
+      nextSettings = {
+        ...nextSettings,
+        assistant: {
+          ...nextSettings.assistant,
+          model: shouldReplaceModel ? defaults.model : nextSettings.assistant.model,
+          endpoint: shouldReplaceEndpoint ? defaults.endpoint : nextSettings.assistant.endpoint,
+        },
+      };
+    }
+    applySettings(nextSettings);
     if (event.detail.path === 'desktopLyrics.displayId' && event.detail.value) {
       const api = windowRef.electronAPI?.desktopLyrics;
       if (!api?.setDisplay) return;
@@ -510,6 +925,11 @@ export function startImmersiveApp({ documentRef = globalThis.document, windowRef
       layoutMode = !event.detail.value;
       nodes.desktopLayoutButton.textContent = layoutMode ? '完成并锁定' : '编辑位置';
     }
+    if (event.detail.path === 'background.mode') {
+      if (event.detail.value === 'wallpaperEngine') refreshWallpaperEngine({ scan: true });
+      else setWallpaperMessage(`${backgroundModeText(event.detail.value)} 已启用`, STATUS.READY);
+    }
+    if (event.detail.path?.startsWith('assistant.')) syncAssistantHints();
   }, undefined, cleanup);
 
   const resize = () => scene?.resize(windowRef.innerWidth, windowRef.innerHeight, windowRef.devicePixelRatio);
@@ -526,6 +946,102 @@ export function startImmersiveApp({ documentRef = globalThis.document, windowRef
     scene?.setCameraInput((event.clientX / Math.max(1, windowRef.innerWidth)) * 2 - 1, (event.clientY / Math.max(1, windowRef.innerHeight)) * 2 - 1);
   }, { passive: true }, cleanup);
   eventOn(windowRef, 'keydown', () => markInput('keyboard'), undefined, cleanup);
+
+  const setGestureStatus = (message, active = false) => {
+    if (!nodes.gestureStatus) return;
+    nodes.gestureStatus.textContent = message;
+    nodes.gestureStatus.dataset.active = String(Boolean(active));
+  };
+
+  const executeGestureCommand = command => {
+    if (command === 'next') runtime.next();
+    else if (command === 'previous') runtime.previous();
+    else if (command === 'volumeUp') {
+      audio.volume = Math.min(1, audio.volume + 0.08);
+      nodes.volumeInput.value = String(audio.volume);
+    } else if (command === 'volumeDown') {
+      audio.volume = Math.max(0, audio.volume - 0.08);
+      nodes.volumeInput.value = String(audio.volume);
+    } else return false;
+    jarvis.setInputState('gesture', true);
+    windowRef.clearTimeout(inputTimers.gesture);
+    inputTimers.gesture = windowRef.setTimeout(() => jarvis.setInputState('gesture', false), 900);
+    setGestureStatus(command === 'next' ? '下一首'
+      : command === 'previous' ? '上一首'
+        : command === 'volumeUp' ? '音量+' : '音量-', true);
+    return true;
+  };
+
+  const stopCameraGestures = () => {
+    if (gestureFrame) windowRef.cancelAnimationFrame(gestureFrame);
+    gestureFrame = 0;
+    gestureSampler = null;
+    gestureSamples.splice(0);
+    gestureStream?.getTracks?.().forEach(track => track.stop());
+    gestureStream = null;
+    if (nodes.gestureCameraPreview) nodes.gestureCameraPreview.srcObject = null;
+    nodes.gestureToggleButton?.setAttribute('aria-pressed', 'false');
+    if (nodes.gestureToggleButton) nodes.gestureToggleButton.textContent = '启用摄像头手势';
+    setGestureStatus('未启用');
+  };
+
+  const startCameraGestureLoop = () => {
+    const loop = now => {
+      gestureFrame = windowRef.requestAnimationFrame(loop);
+      const sample = gestureSampler?.sample(now);
+      if (!sample) return;
+      gestureSamples.push(sample);
+      while (gestureSamples.length > 8) gestureSamples.shift();
+      if (now < gestureCooldownUntil) return;
+      const gesture = classifyMotionGesture(gestureSamples);
+      const command = gestureToCommand(gesture);
+      if (!command) return;
+      gestureCooldownUntil = now + 900;
+      gestureSamples.splice(0);
+      executeGestureCommand(command);
+    };
+    gestureFrame = windowRef.requestAnimationFrame(loop);
+  };
+
+  const startCameraGestures = async () => {
+    if (gestureStream) return stopCameraGestures();
+    if (!windowRef.navigator?.mediaDevices?.getUserMedia) {
+      const message = '当前环境不支持摄像头手势';
+      setGestureStatus(message);
+      toast(message, true);
+      return null;
+    }
+    nodes.gestureToggleButton?.setAttribute('aria-pressed', 'true');
+    if (nodes.gestureToggleButton) nodes.gestureToggleButton.textContent = '正在请求摄像头…';
+    setGestureStatus('待授权');
+    try {
+      gestureStream = await windowRef.navigator.mediaDevices.getUserMedia({
+        video: { width: 320, height: 240, facingMode: 'user' },
+        audio: false,
+      });
+      if (nodes.gestureCameraPreview) {
+        nodes.gestureCameraPreview.srcObject = gestureStream;
+        await nodes.gestureCameraPreview.play?.();
+      }
+      gestureCanvas = gestureCanvas || documentRef.createElement('canvas');
+      gestureSampler = createMotionSampler({
+        video: nodes.gestureCameraPreview,
+        canvas: gestureCanvas,
+      });
+      if (!gestureSampler) throw new Error('摄像头手势初始化失败');
+      if (nodes.gestureToggleButton) nodes.gestureToggleButton.textContent = '关闭摄像头手势';
+      setGestureStatus('已启用', true);
+      toast('摄像头手势已启用：左右切歌，上下调音量');
+      startCameraGestureLoop();
+      return gestureStream;
+    } catch (error) {
+      stopCameraGestures();
+      const message = error?.message || '摄像头权限被拒绝';
+      setGestureStatus('授权失败');
+      toast(message, true);
+      return null;
+    }
+  };
 
   const updateTransport = () => {
     const duration = Number(audio.duration);
@@ -796,6 +1312,23 @@ export function startImmersiveApp({ documentRef = globalThis.document, windowRef
     documentRef.querySelectorAll('[data-library-view]').forEach(node => node.setAttribute('aria-pressed', String(node === tab)));
     if (tab.dataset.libraryView === 'playlists') loadPlaylists();
   }, undefined, cleanup));
+  eventOn(nodes.providerStrip, 'click', event => {
+    const button = event.target.closest?.('[data-provider]');
+    if (!button) return;
+    const provider = button.dataset.provider;
+    if (provider === 'netease') {
+      nodes.providerStrip?.querySelectorAll('[data-provider]').forEach(node => node.setAttribute('aria-pressed', String(node === button)));
+      setMessage('网易云音乐已启用');
+      return;
+    }
+    const message = provider === 'qq'
+      ? 'QQ 音乐官方接入已预留：需要配置 SONIC_QQ_MUSIC_APP_ID / SONIC_QQ_MUSIC_APP_KEY 后启用。'
+      : provider === 'qishui'
+        ? '汽水音乐官方接入已预留：需要配置 SONIC_QISHUI_CLIENT_ID / SONIC_QISHUI_CLIENT_SECRET 后启用。'
+        : 'Apple Music 官方 API 接入仍在计划中。';
+    setMessage(message, 'loading');
+    toast(message);
+  }, undefined, cleanup);
   eventOn(nodes.searchForm, 'submit', async event => {
     event.preventDefault();
     const keyword = nodes.searchInput.value.trim();
@@ -951,6 +1484,65 @@ export function startImmersiveApp({ documentRef = globalThis.document, windowRef
     nodes.desktopLayoutButton.textContent = '编辑位置';
     toast('桌面歌词位置已重置');
   }, undefined, cleanup);
+  eventOn(nodes.wallpaperRefreshButton, 'click', () => refreshWallpaperEngine({ scan: true }), undefined, cleanup);
+  eventOn(nodes.wallpaperApplyButton, 'click', async () => {
+    const api = windowRef.electronAPI?.wallpaperEngine;
+    const file = nodes.wallpaperSelect?.value;
+    if (!api) return toast('Wallpaper Engine 控制仅在桌面应用中可用', true);
+    if (!file) return toast('请先选择一个已安装壁纸', true);
+    setWallpaperMessage('正在应用到桌面', STATUS.LOADING);
+    try {
+      await api.open(file);
+      settings = saveSettings({
+        ...settings,
+        background: {
+          ...settings.background,
+          mode: 'wallpaperEngine',
+          wallpaperEngine: {
+            ...settings.background.wallpaperEngine,
+            selectedFile: file,
+          },
+        },
+      }, settingsStorage);
+      jarvis.setSettings(settings);
+      applyBackgroundPresentation();
+      setWallpaperMessage('Wallpaper Engine 已接管桌面', STATUS.READY);
+      toast('已应用 Wallpaper Engine 壁纸');
+    } catch (error) {
+      setWallpaperMessage(error.message || '应用 Wallpaper Engine 失败', STATUS.ERROR);
+      toast(error.message || '应用 Wallpaper Engine 失败', true);
+    }
+  }, undefined, cleanup);
+  eventOn(nodes.assistantApiKey, 'input', () => {
+    assistantSessionApiKey = String(nodes.assistantApiKey?.value || '');
+    syncAssistantHints();
+  }, undefined, cleanup);
+  eventOn(nodes.assistantWeatherButton, 'click', refreshAssistantWeather, undefined, cleanup);
+  eventOn(nodes.assistantSendButton, 'click', () => askAssistant(), undefined, cleanup);
+  eventOn(nodes.assistantPromptInput, 'keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    askAssistant();
+  }, undefined, cleanup);
+  eventOn(nodes.assistantListenButton, 'click', event => {
+    event.stopPropagation();
+    startAssistantListening();
+  }, undefined, cleanup);
+  eventOn(nodes.assistantActions, 'click', event => {
+    const button = event.target.closest?.('[data-assistant-action="search"]');
+    if (!button) return;
+    const keyword = button.dataset.keyword || '';
+    if (!keyword) return;
+    nodes.searchInput.value = keyword;
+    setRailOpen(shell, nodes.libraryRail, nodes.libraryToggle, true, 'libraryOpen');
+    nodes.searchForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  }, undefined, cleanup);
+  eventOn(nodes.gestureToggleButton, 'click', startCameraGestures, undefined, cleanup);
+  eventOn(nodes.jarvisCompanion, 'click', event => {
+    if (event.target === nodes.assistantListenButton || nodes.assistantListenButton?.contains?.(event.target)) return;
+    setRailOpen(shell, commandRail, nodes.energyCore, true, 'consoleOpen');
+    nodes.assistantPromptInput?.focus?.();
+  }, undefined, cleanup);
   eventOn(nodes.restoreDefaults, 'click', async () => {
     const api = windowRef.electronAPI?.desktopLyrics;
     await runRecoverableDesktopAction(
@@ -1069,6 +1661,7 @@ export function startImmersiveApp({ documentRef = globalThis.document, windowRef
     const lockResult = await desktopApi?.lock?.(settings.desktopLyrics.locked);
     if (lockResult?.bounds) persistDesktopResult(lockResult);
   }).catch?.(error => toast(error.message, true));
+  refreshWallpaperEngine({ scan: settings.background.mode === 'wallpaperEngine' });
   setMVPresentation({ state: 'unavailable', enabled: false, metadata: null });
   refreshAccount();
 
@@ -1080,6 +1673,9 @@ export function startImmersiveApp({ documentRef = globalThis.document, windowRef
     () => windowRef.clearTimeout(toastTimer),
     () => { if (localObjectUrl) windowRef.URL.revokeObjectURL(localObjectUrl); },
     () => trackController?.abort(),
+    () => assistantRecognition?.stop?.(),
+    () => stopCameraGestures(),
+    () => windowRef.speechSynthesis?.cancel?.(),
     () => jarvis.destroy(),
     () => lyricEngine.destroy(),
     () => mvController.destroy(),

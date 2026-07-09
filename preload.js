@@ -20,4 +20,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('desktop-lyrics:layout-result', listener);
     },
   }),
+  wallpaperEngine: Object.freeze({
+    status: () => ipcRenderer.invoke('wallpaper-engine:status'),
+    scan: () => ipcRenderer.invoke('wallpaper-engine:scan'),
+    open: (filePath) => ipcRenderer.invoke('wallpaper-engine:open', filePath),
+  }),
+  hud: Object.freeze({
+    setState: (state) => ipcRenderer.invoke('hud:set-state', state),
+    state: () => ipcRenderer.invoke('hud:get-state'),
+    onState(callback) {
+      if (typeof callback !== 'function') throw new TypeError('onState requires a callback');
+      const listener = (_event, state) => callback(state);
+      ipcRenderer.on('hud:state', listener);
+      return () => ipcRenderer.removeListener('hud:state', listener);
+    },
+  }),
 });

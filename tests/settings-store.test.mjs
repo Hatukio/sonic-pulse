@@ -14,9 +14,15 @@ test('normalizes invalid visual settings without overriding a valid frame rate',
     version: 1,
     performance: { frameRate: 120 },
     visual: { personality: 'unknown', particleCount: -4 },
+    background: { mode: 'wallpaperEngine', wallpaperEngine: { selectedFile: 'C:/wall/project.json', autoApply: true } },
   }), {
     ...DEFAULT_SETTINGS,
     performance: { ...DEFAULT_SETTINGS.performance, frameRate: 120 },
+    background: {
+      ...DEFAULT_SETTINGS.background,
+      mode: 'wallpaperEngine',
+      wallpaperEngine: { selectedFile: 'C:/wall/project.json', autoApply: true },
+    },
   });
 });
 
@@ -122,6 +128,75 @@ test('rounds fractional particle counts to a valid buffer size', () => {
 
 test('always disables MV when normalizing persisted settings', () => {
   assert.deepEqual(normalizeSettings({ mv: { enabled: true } }).mv, { enabled: false });
+});
+
+test('normalizes background source choices and limits persisted wallpaper paths', () => {
+  const longPath = 'x'.repeat(3000);
+  const settings = normalizeSettings({
+    background: {
+      mode: 'web',
+      wallpaperEngine: { selectedFile: longPath, autoApply: 'yes' },
+      localVideo: { objectUrl: longPath },
+      web: { url: 'https://example.com/wallpaper.html' },
+    },
+  });
+
+  assert.equal(settings.background.mode, 'web');
+  assert.equal(settings.background.wallpaperEngine.selectedFile.length, 2048);
+  assert.equal(settings.background.wallpaperEngine.autoApply, DEFAULT_SETTINGS.background.wallpaperEngine.autoApply);
+  assert.equal(settings.background.localVideo.objectUrl.length, 2048);
+  assert.equal(settings.background.web.url, 'https://example.com/wallpaper.html');
+  assert.equal(normalizeSettings({ background: { mode: 'steam' } }).background.mode, DEFAULT_SETTINGS.background.mode);
+});
+
+test('normalizes transparent HUD and assistant provider choices without persisting API keys', () => {
+  const longWeather = '杭州 小雨 18℃ ' + 'x'.repeat(300);
+  const settings = normalizeSettings({
+    surface: {
+      mode: 'transparent',
+      clickThrough: true,
+      opacity: 2,
+    },
+    assistant: {
+      enabled: true,
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      endpoint: 'https://api.deepseek.com',
+      mood: 'focus',
+      weather: longWeather,
+      voiceInput: false,
+      voiceOutput: true,
+      apiKey: 'must-not-persist',
+    },
+  });
+
+  assert.deepEqual(settings.surface, {
+    mode: 'transparent',
+    clickThrough: true,
+    opacity: 1,
+  });
+  assert.deepEqual(settings.assistant, {
+    enabled: true,
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash',
+    endpoint: 'https://api.deepseek.com',
+    mood: 'focus',
+    weather: longWeather.slice(0, 120),
+    voiceInput: false,
+    voiceOutput: true,
+  });
+  assert.equal(Object.hasOwn(settings.assistant, 'apiKey'), false);
+
+  const fallback = normalizeSettings({
+    surface: { mode: 'invisible', opacity: 0 },
+    assistant: { provider: 'free-cloud', mood: 'chaos' },
+  });
+  assert.deepEqual(fallback.surface, {
+    ...DEFAULT_SETTINGS.surface,
+    opacity: 0.15,
+  });
+  assert.equal(fallback.assistant.provider, DEFAULT_SETTINGS.assistant.provider);
+  assert.equal(fallback.assistant.mood, DEFAULT_SETTINGS.assistant.mood);
 });
 
 test('loadSettings falls back safely when persisted JSON is malformed', () => {

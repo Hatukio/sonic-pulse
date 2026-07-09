@@ -125,7 +125,11 @@ export class JarvisConsole extends EventTarget {
   }
 
   setInputState(kind, active) {
-    const node = this.root.querySelector(kind === 'mouse' ? '#mouseStatus' : '#keyboardStatus');
+    const node = this.root.querySelector(
+      kind === 'mouse' ? '#mouseStatus'
+        : kind === 'gesture' ? '#gestureStatus'
+          : '#keyboardStatus',
+    );
     if (!node) return;
     node.textContent = active ? '活跃' : '待命';
     node.dataset.active = String(Boolean(active));

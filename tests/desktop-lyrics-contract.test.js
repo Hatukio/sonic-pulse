@@ -43,6 +43,7 @@ function loadPreload(fileName) {
 
 test('main preload exposes desktop placement commands and an unsubscribable layout result', async () => {
   const harness = loadPreload('preload.js');
+  assert.deepEqual(Object.keys(harness.exposed.electronAPI).sort(), ['desktopLyrics', 'hud', 'openLogin', 'platform', 'setCookie', 'wallpaperEngine']);
   const api = harness.exposed.electronAPI.desktopLyrics;
   assert.deepEqual(Object.keys(api).sort(), ['applyPreset', 'close', 'displays', 'layout', 'lock', 'onLayoutResult', 'open', 'reset', 'setDisplay', 'state']);
 
@@ -72,6 +73,36 @@ test('main preload exposes desktop placement commands and an unsubscribable layo
     ['desktop-lyrics:set-display', '88'],
     ['desktop-lyrics:reset', { displayId: '88', placement: 'bottom' }],
   ]);
+});
+
+test('main preload exposes narrow Wallpaper Engine and transparent HUD APIs', async () => {
+  const harness = loadPreload('preload.js');
+  const wallpaper = harness.exposed.electronAPI.wallpaperEngine;
+  const hud = harness.exposed.electronAPI.hud;
+  assert.deepEqual(Object.keys(wallpaper).sort(), ['open', 'scan', 'status']);
+  assert.deepEqual(Object.keys(hud).sort(), ['onState', 'setState', 'state']);
+
+  await wallpaper.status();
+  await wallpaper.scan();
+  await wallpaper.open('C:/wallpaper/project.json');
+  await hud.setState({ surfaceMode: 'transparent', clickThrough: true });
+  await hud.state();
+
+  let hudState = null;
+  const unsubscribe = hud.onState(state => { hudState = state; });
+  const listener = harness.listeners.get('hud:state');
+  listener({}, { surfaceMode: 'transparent' });
+  assert.equal(hudState.surfaceMode, 'transparent');
+  unsubscribe();
+
+  assert.deepEqual(harness.calls, [
+    ['wallpaper-engine:status', undefined],
+    ['wallpaper-engine:scan', undefined],
+    ['wallpaper-engine:open', 'C:/wallpaper/project.json'],
+    ['hud:set-state', { surfaceMode: 'transparent', clickThrough: true }],
+    ['hud:get-state', undefined],
+  ]);
+  assert.deepEqual(harness.removed[0], ['hud:state', listener]);
 });
 
 test('desktop preload has a narrow API and listeners are unsubscribable', async () => {
@@ -110,6 +141,12 @@ test('desktop lyric window and IPC use the hardened Electron contract', () => {
     'desktop-lyrics:set-display',
     'desktop-lyrics:reset',
     'desktop-lyrics:layout-result',
+    'wallpaper-engine:status',
+    'wallpaper-engine:scan',
+    'wallpaper-engine:open',
+    'hud:set-state',
+    'hud:get-state',
+    'hud:state',
   ]) assert.match(main, new RegExp(channel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
   assert.match(main, /transparent:\s*true/);
@@ -124,6 +161,8 @@ test('desktop lyric window and IPC use the hardened Electron contract', () => {
   assert.match(main, /setIgnoreMouseEvents\(true,\s*\{\s*forward:\s*true\s*\}\)/);
   assert.match(main, /setAlwaysOnTop\(true,\s*'screen-saver'\)/);
   assert.match(main, /setVisibleOnAllWorkspaces\(true/);
+  assert.match(main, /CommandOrControl\+Shift\+H/);
+  assert.match(main, /setIgnoreMouseEvents\(hudState\.clickThrough,\s*\{\s*forward:\s*true\s*\}\)/);
   assert.match(main, /http:\/\/localhost:\$\{PORT\}\/desktop-lyrics\.html/);
   assert.match(main, /event\.sender/);
   assert.match(main, /function boundsForPlacement/);
@@ -179,8 +218,10 @@ test('desktop lyric runtime files are included in packaged builds', () => {
   assert.ok(fs.existsSync(path.join(root, 'build/icon.ico')));
   assert.ok(manifest.build.files.includes('desktop-preload.js'));
   assert.ok(manifest.build.files.includes('desktop-lyrics-state.js'));
+  assert.ok(manifest.build.files.includes('wallpaper-engine.js'));
   assert.ok(manifest.build.files.includes('server-health.js'));
   assert.ok(manifest.build.files.includes('server/providers/**/*'));
+  assert.ok(manifest.build.files.includes('server/assistant/**/*'));
   assert.ok(manifest.build.files.includes('public/**/*'));
   assert.ok(manifest.build.win.target.some(target => target.target === 'nsis'));
   assert.deepEqual(manifest.build.nsis, {

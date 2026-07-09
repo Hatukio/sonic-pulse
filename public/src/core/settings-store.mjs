@@ -25,6 +25,34 @@ export const DEFAULT_SETTINGS = deepFreeze({
     trails: 0.45,
     camera: 'cinematic',
   },
+  background: {
+    mode: 'sonic',
+    wallpaperEngine: {
+      selectedFile: '',
+      autoApply: false,
+    },
+    localVideo: {
+      objectUrl: '',
+    },
+    web: {
+      url: '',
+    },
+  },
+  surface: {
+    mode: 'immersive',
+    clickThrough: false,
+    opacity: 0.82,
+  },
+  assistant: {
+    enabled: true,
+    provider: 'local',
+    model: 'sonic-local-companion',
+    endpoint: '',
+    mood: 'auto',
+    weather: '',
+    voiceInput: true,
+    voiceOutput: true,
+  },
   lyrics: {
     enabled: true,
     style: 'auto',
@@ -49,6 +77,10 @@ const PERFORMANCE_QUALITIES = new Set(['eco', 'balanced', 'ultra']);
 const FORMS = new Set(['artwork', 'nebula', 'tunnel', 'ribbons']);
 const PERSONALITIES = new Set(['auto', 'ambient', 'pop', 'impact', 'fluid']);
 const CAMERAS = new Set(['locked', 'orbit', 'cinematic', 'manual']);
+const BACKGROUND_MODES = new Set(['sonic', 'wallpaperEngine', 'localVideo', 'web']);
+const SURFACE_MODES = new Set(['immersive', 'transparent']);
+const ASSISTANT_PROVIDERS = new Set(['local', 'doubao', 'qwen', 'deepseek', 'ollama', 'lmstudio', 'openaiCompatible']);
+const ASSISTANT_MOODS = new Set(['auto', 'calm', 'focus', 'tired', 'happy', 'sad', 'night']);
 const LYRIC_STYLES = new Set(['auto', 'depth', 'orbit', 'particles', 'energy']);
 const DESKTOP_PLACEMENTS = new Set(['center', 'bottom', 'left', 'right']);
 
@@ -92,6 +124,12 @@ export function normalizeSettings(input = {}) {
   const source = objectOrEmpty(input);
   const performance = objectOrEmpty(source.performance);
   const visual = objectOrEmpty(source.visual);
+  const background = objectOrEmpty(source.background);
+  const wallpaperEngine = objectOrEmpty(background.wallpaperEngine);
+  const localVideo = objectOrEmpty(background.localVideo);
+  const web = objectOrEmpty(background.web);
+  const surface = objectOrEmpty(source.surface);
+  const assistant = objectOrEmpty(source.assistant);
   const lyrics = objectOrEmpty(source.lyrics);
   const desktopLyrics = objectOrEmpty(source.desktopLyrics);
 
@@ -122,6 +160,49 @@ export function normalizeSettings(input = {}) {
       bloom: finite(visual.bloom, DEFAULT_SETTINGS.visual.bloom, 0, 1.5),
       trails: finite(visual.trails, DEFAULT_SETTINGS.visual.trails, 0, 0.95),
       camera: choice(visual.camera, CAMERAS, DEFAULT_SETTINGS.visual.camera),
+    },
+    background: {
+      mode: choice(background.mode, BACKGROUND_MODES, DEFAULT_SETTINGS.background.mode),
+      wallpaperEngine: {
+        selectedFile: typeof wallpaperEngine.selectedFile === 'string'
+          ? wallpaperEngine.selectedFile.slice(0, 2048)
+          : DEFAULT_SETTINGS.background.wallpaperEngine.selectedFile,
+        autoApply: boolean(
+          wallpaperEngine.autoApply,
+          DEFAULT_SETTINGS.background.wallpaperEngine.autoApply,
+        ),
+      },
+      localVideo: {
+        objectUrl: typeof localVideo.objectUrl === 'string'
+          ? localVideo.objectUrl.slice(0, 2048)
+          : DEFAULT_SETTINGS.background.localVideo.objectUrl,
+      },
+      web: {
+        url: typeof web.url === 'string'
+          ? web.url.slice(0, 2048)
+          : DEFAULT_SETTINGS.background.web.url,
+      },
+    },
+    surface: {
+      mode: choice(surface.mode, SURFACE_MODES, DEFAULT_SETTINGS.surface.mode),
+      clickThrough: boolean(surface.clickThrough, DEFAULT_SETTINGS.surface.clickThrough),
+      opacity: finite(surface.opacity, DEFAULT_SETTINGS.surface.opacity, 0.15, 1),
+    },
+    assistant: {
+      enabled: boolean(assistant.enabled, DEFAULT_SETTINGS.assistant.enabled),
+      provider: choice(assistant.provider, ASSISTANT_PROVIDERS, DEFAULT_SETTINGS.assistant.provider),
+      model: typeof assistant.model === 'string'
+        ? assistant.model.slice(0, 120)
+        : DEFAULT_SETTINGS.assistant.model,
+      endpoint: typeof assistant.endpoint === 'string'
+        ? assistant.endpoint.slice(0, 2048)
+        : DEFAULT_SETTINGS.assistant.endpoint,
+      mood: choice(assistant.mood, ASSISTANT_MOODS, DEFAULT_SETTINGS.assistant.mood),
+      weather: typeof assistant.weather === 'string'
+        ? assistant.weather.replace(/\s+/g, ' ').trim().slice(0, 120)
+        : DEFAULT_SETTINGS.assistant.weather,
+      voiceInput: boolean(assistant.voiceInput, DEFAULT_SETTINGS.assistant.voiceInput),
+      voiceOutput: boolean(assistant.voiceOutput, DEFAULT_SETTINGS.assistant.voiceOutput),
     },
     lyrics: {
       enabled: boolean(lyrics.enabled, DEFAULT_SETTINGS.lyrics.enabled),

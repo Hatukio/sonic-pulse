@@ -17,7 +17,12 @@ const {
   search, song_detail, mv_detail, mv_url, lyric
 } = require('NeteaseCloudMusicApi');
 const { createProviderRegistry } = require('./server/providers/registry');
+const { createCredentialProvider } = require('./server/providers/credential-provider');
 const { createNeteaseProvider } = require('./server/providers/netease');
+const {
+  buildAssistantCatalog,
+  runAssistantTurn,
+} = require('./server/assistant/jarvis');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -43,6 +48,18 @@ const providers = createProviderRegistry({
         lyric,
       },
       getSession: () => state,
+    }),
+    qq: createCredentialProvider({
+      id: 'qq',
+      name: 'QQ 音乐',
+      docsUrl: 'https://developer.y.qq.com/docs/openapi',
+      requiredEnv: ['SONIC_QQ_MUSIC_APP_ID', 'SONIC_QQ_MUSIC_APP_KEY'],
+    }),
+    qishui: createCredentialProvider({
+      id: 'qishui',
+      name: '汽水音乐',
+      docsUrl: 'https://music.douyin.com/',
+      requiredEnv: ['SONIC_QISHUI_CLIENT_ID', 'SONIC_QISHUI_CLIENT_SECRET'],
     }),
   },
 });
@@ -228,6 +245,19 @@ app.get('/api/providers', (_req, res) => {
   res.json({ providers: providers.catalog() });
 });
 
+app.get('/api/assistant/providers', (_req, res) => {
+  res.json({ providers: buildAssistantCatalog() });
+});
+
+app.post('/api/assistant/chat', async (req, res) => {
+  try {
+    res.json(await runAssistantTurn(req.body || {}));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(/key|endpoint|地址|模型/i.test(message) ? 400 : 502).json({ error: message });
+  }
+});
+
 // 退出登录
 app.post('/api/logout', (req, res) => {
   state = { cookie: null, uid: null, nickname: null };
@@ -257,11 +287,11 @@ app.get('/api/playlist/:id/tracks', async (req, res) => {
 
 // ─── 搜索 ─────────────────────────────────────────────────────────
 app.get('/api/search', async (req, res) => {
-  const { keyword, limit = 20 } = req.query;
+  const { keyword, limit = 20, provider = 'netease' } = req.query;
   if (!keyword) return res.status(400).json({ error: '缺少关键词' });
   try {
-    res.json({ songs: await providers.call('netease', 'search', { keyword, limit }) });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+    res.json({ songs: await providers.call(provider, 'search', { keyword, limit }) });
+  } catch(e) { res.status(providerErrorStatus(e)).json({ error: e.message }); }
 });
 
 // ─── 音频代理（解决跨域，让 Web Audio API 能分析频谱）────────────
@@ -452,4 +482,6 @@ module.exports = {
   destroyUpstream,
   proxyMVStream,
   providers,
+  buildAssistantCatalog,
+  runAssistantTurn,
 };
