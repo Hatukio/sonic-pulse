@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Sonic Pulse 桌面歌词</title>
+  <link rel="stylesheet" href="/styles/desktop-lyrics.css">
+</head>
+<body data-style="depth" data-personality="auto">
+  <main class="desktop-stage" aria-live="polite" aria-atomic="true">
+    <div class="aura" aria-hidden="true"><i></i><i></i><i></i></div>
+    <section class="lyrics" aria-label="正在播放的歌词">
+      <p id="lyricPrev" class="context-line previous"></p>
+      <div class="current-cluster">
+        <p id="lyricCurrent" class="current-line"></p>
+        <p id="lyricTranslation" class="translation-line"></p>
+      </div>
+      <p id="lyricNext" class="context-line next"></p>
+    </section>
+    <div class="signal" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+  </main>
+
+  <div class="layout-chrome" aria-label="桌面歌词布局模式">
+    <div class="drag-surface">
+      <span class="layout-label">桌面歌词布局</span>
+      <span class="layout-hint">拖动此处移动 · 拖动四角缩放</span>
+      <span id="lockState" class="lock-state">点击穿透</span>
+    </div>
+    <button id="finishLayout" class="finish-layout" type="button">完成布局</button>
+  </div>
+  <button class="resize-handle northwest" data-resize="nw" type="button" aria-label="从左上角缩放"></button>
+  <button class="resize-handle northeast" data-resize="ne" type="button" aria-label="从右上角缩放"></button>
+  <button class="resize-handle southwest" data-resize="sw" type="button" aria-label="从左下角缩放"></button>
+  <button class="resize-handle southeast" data-resize="se" type="button" aria-label="从右下角缩放"></button>
+
+  <script type="module" src="/src/desktop/desktop-lyrics.mjs"></script>
+</body>
+</html>

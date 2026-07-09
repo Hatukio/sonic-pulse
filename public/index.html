@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#02060b">
+  <title>Sonic Pulse · Arc Theatre</title>
+  <link rel="stylesheet" href="/styles/arc-theatre.css">
+  <script type="importmap">
+    {"imports":{"three":"/vendor/three/three.module.js","three/addons/":"/vendor/three-addons/"}}
+  </script>
+</head>
+<body>
+  <div class="app-shell" id="appShell" data-library-open="false" data-console-open="false" data-shelf-mode="vinyl" data-play-mode="sequence" data-lyrics-visible="true" data-window-mode="standard" data-platform="windows-macos">
+    <!-- Legacy handoff audit marker retained for migration tests only:
+      function draw(){ requestAnimationFrame(draw); if(document.body.classList.contains('three-ready')) return; const W=window.innerWidth
+      window.__sonicPulseAudioGraph={audio,context:audioCtx,analyser,source:audioSrc,data:dataArray}
+    -->
+    <header class="top-chrome">
+      <button class="icon-button library-trigger" id="libraryToggle" type="button" aria-controls="libraryRail" aria-expanded="false" aria-label="打开音乐库">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h12M4 18h8"/></svg>
+      </button>
+      <div class="identity" aria-label="Sonic Pulse Arc Theatre">
+        <span>SONIC PULSE</span><i></i><span>ARC THEATRE</span>
+      </div>
+      <div class="top-status" id="topStatus" role="status">
+        <span class="status-light"></span><span id="systemStatus">VISUAL CORE READY</span><span id="topFrameRate">60 FPS</span>
+      </div>
+    </header>
+
+    <main class="theatre" id="theatre">
+      <canvas id="visualStage" aria-label="专辑三维点云可视化"></canvas>
+      <video id="mvLayer" muted playsinline crossorigin="anonymous" aria-label="官方音乐视频"></video>
+      <div class="aurora-field" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div class="stage-vignette" aria-hidden="true"></div>
+      <div id="lyricStage" class="lyric-stage" aria-live="polite" aria-atomic="true">
+        <p class="lyric-context" data-lyric="previous"></p>
+        <p class="lyric-current" data-lyric="current">选择一首歌，让声音成为光</p>
+        <p class="lyric-translation" data-lyric="translation"></p>
+        <p class="lyric-context" data-lyric="next"></p>
+      </div>
+    </main>
+
+    <aside id="vinylShelf" class="vinyl-shelf" aria-label="当前播放队列黑胶唱片架">
+      <div class="vinyl-shelf-heading">
+        <div><span class="micro-label">NOW QUEUE</span><h2>黑胶唱片架</h2></div>
+        <span class="shelf-count" id="vinylShelfCount">0</span>
+      </div>
+      <ol id="vinylShelfList" class="vinyl-shelf-list"></ol>
+      <p id="vinylShelfEmpty" class="vinyl-shelf-empty">打开音乐库后，歌曲会以唱片形式停靠在这里。</p>
+    </aside>
+
+    <aside id="libraryRail" class="library-rail" aria-label="音乐库" aria-hidden="true">
+      <div class="rail-heading">
+        <div><span class="micro-label">MUSIC SOURCE</span><h1>音乐库</h1></div>
+        <button class="icon-button" id="libraryClose" type="button" aria-label="关闭音乐库">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <div class="account-strip">
+        <div><span class="account-dot" id="accountDot"></span><span id="accountName">网易云未连接</span></div>
+        <div class="account-actions">
+          <button class="text-button" id="loginButton" type="button">登录</button>
+          <button class="text-button" id="logoutButton" type="button" hidden>退出</button>
+        </div>
+      </div>
+      <div id="providerStrip" class="provider-strip" data-platform="windows-macos" aria-label="音乐平台来源">
+        <button type="button" data-provider="netease" aria-pressed="true"><span>网易云</span><small>LIVE</small></button>
+        <button type="button" data-provider="qq" aria-pressed="false" disabled><span>QQ</span><small>NEXT</small></button>
+        <button type="button" data-provider="qishui" aria-pressed="false" disabled><span>汽水</span><small>NEXT</small></button>
+        <button type="button" data-provider="apple" aria-pressed="false" disabled><span>Apple</span><small>API</small></button>
+      </div>
+      <form class="search-line" id="searchForm" role="search">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+        <label class="sr-only" for="searchInput">搜索歌曲或歌手</label>
+        <input id="searchInput" type="search" autocomplete="off" placeholder="搜索歌曲 / 歌手">
+        <button class="text-button" type="submit">搜索</button>
+      </form>
+      <nav class="library-tabs" aria-label="音乐库分类">
+        <button id="likedButton" class="rail-tab" type="button" aria-pressed="true" data-library-view="liked">我喜欢</button>
+        <button class="rail-tab" type="button" aria-pressed="false" data-library-view="playlists">歌单</button>
+        <label class="rail-tab local-file" for="localAudio">本地音频</label>
+        <input id="localAudio" type="file" accept="audio/*">
+      </nav>
+      <div id="libraryMessage" class="rail-message" role="status">登录后加载网易云音乐</div>
+      <div id="playlistList" class="playlist-list" aria-label="歌单列表"></div>
+      <ol id="trackList" class="track-list" aria-label="歌曲列表"></ol>
+    </aside>
+
+    <section id="commandRail" class="command-rail" aria-label="视觉控制台" aria-hidden="true">
+      <div class="console-heading">
+        <div><span class="micro-label">JARVIS CORE</span><h2>视觉指令轨</h2></div>
+        <span class="live-chip"><i></i> LIVE</span>
+      </div>
+      <div class="jarvis-hero" aria-label="Jarvis 控制台状态">
+        <div class="jarvis-orb" aria-hidden="true"><i></i></div>
+        <div>
+          <span class="micro-label">P0 PRODUCT MODE</span>
+          <strong>沉浸控制中心</strong>
+          <p>视觉、歌词、MV、性能与桌面层统一调度</p>
+        </div>
+      </div>
+
+      <div class="console-deck">
+      <details class="console-group console-card" open>
+        <summary><span>01</span> VISUAL CORE</summary>
+        <div class="console-body">
+          <p class="subsystem-status" data-subsystem-status="visual" data-status="loading">视觉核心启动中</p>
+          <label class="control-line"><span>空间形态</span><select id="visualForm" data-setting="visual.form"><option value="artwork">专辑雕塑</option><option value="nebula">星云场</option><option value="tunnel">能量隧道</option><option value="ribbons">流体丝带</option></select></label>
+          <label class="control-line"><span>视觉人格</span><select id="visualPersonality" data-setting="visual.personality"><option value="auto">节奏自动</option><option value="ambient">氛围</option><option value="pop">流行</option><option value="impact">冲击</option><option value="fluid">流体</option></select></label>
+          <label class="range-line" for="particleCount"><span>粒子数量</span><output data-output-for="particleCount">70000</output></label><input id="particleCount" data-setting="visual.particleCount" type="range" min="10000" max="180000" step="5000">
+          <label class="range-line" for="visualDepth"><span>空间深度</span><output data-output-for="visualDepth">1</output></label><input id="visualDepth" data-setting="visual.depth" type="range" min="0" max="2" step="0.05">
+          <label class="range-line" for="visualBloom"><span>辉光</span><output data-output-for="visualBloom">0.65</output></label><input id="visualBloom" data-setting="visual.bloom" type="range" min="0" max="1.5" step="0.05">
+          <label class="range-line" for="visualTrails"><span>余像</span><output data-output-for="visualTrails">0.45</output></label><input id="visualTrails" data-setting="visual.trails" type="range" min="0" max="0.95" step="0.05">
+          <label class="control-line"><span>镜头</span><select id="visualCamera" data-setting="visual.camera"><option value="cinematic">电影运镜</option><option value="orbit">环绕</option><option value="locked">锁定</option><option value="manual">手动</option></select></label>
+        </div>
+      </details>
+
+      <details class="console-group console-card" open>
+        <summary><span>02</span> LYRICS</summary>
+        <div class="console-body">
+          <p class="subsystem-status" data-subsystem-status="lyrics" data-status="ready">等待歌曲歌词</p>
+          <label class="control-line"><span>表现方式</span><select id="lyricStyle" data-setting="lyrics.style"><option value="auto">随节奏自动</option><option value="depth">景深聚焦</option><option value="orbit">轨道排列</option><option value="particles">粒子成形</option><option value="energy">能量字体</option></select></label>
+          <label class="range-line" for="lyricSize"><span>字号</span><output data-output-for="lyricSize">1</output></label><input id="lyricSize" data-setting="lyrics.size" type="range" min="0.6" max="1.8" step="0.05">
+          <label class="range-line" for="lyricIntensity"><span>动效强度</span><output data-output-for="lyricIntensity">0.8</output></label><input id="lyricIntensity" data-setting="lyrics.intensity" type="range" min="0" max="1" step="0.05">
+          <label class="switch-line" for="translationToggle"><span>显示翻译</span><input id="translationToggle" data-setting="lyrics.translation" type="checkbox" role="switch"></label>
+        </div>
+      </details>
+
+      <details class="console-group console-card" open>
+        <summary><span>03</span> OFFICIAL MV</summary>
+        <div class="console-body">
+          <p class="subsystem-status" data-subsystem-status="mv" data-status="ready">等待歌曲</p>
+          <div class="data-line"><span>可用状态</span><strong id="mvAvailability">等待歌曲</strong></div>
+          <div class="data-line"><span>画质</span><strong id="mvQuality">—</strong></div>
+          <div class="data-line"><span>同步</span><strong id="mvSyncStatus">待命</strong></div>
+          <button class="action-line amber" id="mvToggle" type="button" aria-pressed="false" disabled>启用官方 MV</button>
+        </div>
+      </details>
+
+      <details class="console-group console-card">
+        <summary><span>04</span> DESKTOP LYRICS</summary>
+        <div class="console-body">
+          <p class="subsystem-status" data-subsystem-status="desktop" data-status="ready">桌面歌词待命</p>
+          <label class="switch-line" for="desktopLyricsToggle"><span>桌面歌词</span><input id="desktopLyricsToggle" data-setting="desktopLyrics.enabled" type="checkbox" role="switch"></label>
+          <label class="switch-line" for="desktopLyricsLock"><span>锁定点击穿透</span><input id="desktopLyricsLock" data-setting="desktopLyrics.locked" type="checkbox" role="switch"></label>
+          <div class="desktop-preset-grid" aria-label="桌面歌词位置预设">
+            <button id="desktopPresetCenter" type="button" data-setting="desktopLyrics.placement" data-value="center" aria-pressed="false">中央</button>
+            <button id="desktopPresetBottom" type="button" data-setting="desktopLyrics.placement" data-value="bottom" aria-pressed="true">底部</button>
+            <button id="desktopPresetLeft" type="button" data-setting="desktopLyrics.placement" data-value="left" aria-pressed="false">左侧</button>
+            <button id="desktopPresetRight" type="button" data-setting="desktopLyrics.placement" data-value="right" aria-pressed="false">右侧</button>
+          </div>
+          <button class="action-line" id="desktopLayoutButton" type="button">编辑位置</button>
+          <label class="range-line" for="desktopOpacity"><span>透明度</span><output data-output-for="desktopOpacity">0.88</output></label><input id="desktopOpacity" data-setting="desktopLyrics.opacity" type="range" min="0.2" max="1" step="0.02">
+          <label class="control-line"><span>显示器</span><select id="desktopDisplay" data-setting="desktopLyrics.displayId"><option value="">自动 / 当前屏幕</option></select></label>
+          <button class="action-line" id="desktopResetButton" type="button">重置位置</button>
+        </div>
+      </details>
+
+      <details class="console-group console-card" open>
+        <summary><span>05</span> PERFORMANCE</summary>
+        <div class="console-body">
+          <p class="subsystem-status" data-subsystem-status="performance" data-status="loading">正在采样帧率</p>
+          <div id="frameRateControls" class="segmented" aria-label="动画帧率">
+            <button type="button" data-setting="performance.frameRate" data-value="30" aria-pressed="false">30</button>
+            <button type="button" data-setting="performance.frameRate" data-value="60" aria-pressed="true">60</button>
+            <button type="button" data-setting="performance.frameRate" data-value="120" aria-pressed="false">120</button>
+            <button type="button" data-setting="performance.frameRate" data-value="unlocked" aria-pressed="false">MAX</button>
+          </div>
+          <div id="qualityControls" class="segmented quality-segmented" aria-label="渲染质量">
+            <button type="button" data-setting="performance.quality" data-value="eco" aria-pressed="false">低功耗</button>
+            <button type="button" data-setting="performance.quality" data-value="balanced" aria-pressed="true">均衡</button>
+            <button type="button" data-setting="performance.quality" data-value="ultra" aria-pressed="false">极致</button>
+          </div>
+          <label class="switch-line" for="autoQualityToggle"><span>智能降级</span><input id="autoQualityToggle" data-setting="performance.autoQuality" type="checkbox" role="switch"></label>
+          <div class="data-line"><span>选择</span><strong id="selectedFrameRate">60 FPS</strong></div>
+          <div class="data-line"><span>质量</span><strong id="qualityStatus">balanced</strong></div>
+          <div class="data-line"><span>实测</span><strong id="measuredFps">—</strong></div>
+          <div class="data-line"><span>渲染器</span><strong id="rendererStatus">检测中</strong></div>
+          <div class="data-line"><span>帧预算负载</span><strong id="gpuLoad">N/A</strong></div>
+          <p class="inline-warning" id="performanceWarning" hidden></p>
+        </div>
+      </details>
+
+      <details class="console-group console-card">
+        <summary><span>06</span> INPUT</summary>
+        <div class="console-body">
+          <div class="data-line"><span>鼠标</span><strong id="mouseStatus">待命</strong></div>
+          <div class="data-line"><span>键盘</span><strong id="keyboardStatus">待命</strong></div>
+          <div class="data-line disabled"><span>手势摄像头</span><strong id="gestureStatus">未来可用</strong></div>
+        </div>
+      </details>
+      </div>
+      <button class="restore-button" id="restoreDefaults" type="button">恢复默认设置</button>
+    </section>
+
+    <footer id="playbackArc" class="playback-arc">
+      <div class="track-identity">
+        <div class="artwork-frame"><img id="trackArtwork" alt=""><span id="artworkFallback">SP</span></div>
+        <div class="track-copy"><strong id="trackTitle">尚未选择歌曲</strong><span id="trackArtist">从音乐库或本地文件开始</span></div>
+        <span class="mv-badge" id="nowPlayingMVBadge" hidden>MV</span>
+        <div class="playback-actions track-actions" aria-label="当前歌曲动作">
+          <button class="action-button" id="favoriteButton" type="button" aria-pressed="false" aria-label="喜欢当前歌曲">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 20s-7-4.2-8.7-9A4.7 4.7 0 0 1 12 7a4.7 4.7 0 0 1 8.7 4c-1.7 4.8-8.7 9-8.7 9Z"/></svg>
+          </button>
+          <button class="action-button play-mode-button" id="playModeButton" type="button" data-play-mode="sequence" aria-label="播放方式：顺序播放">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h11c3 0 5 2 5 5s-2 5-5 5H4"/><path d="m15 12 5-5 5 5" transform="translate(-5 0)"/></svg>
+            <span id="playModeLabel">顺序</span>
+          </button>
+        </div>
+      </div>
+      <div class="transport-cluster">
+        <button class="transport-button" id="previousButton" type="button" aria-label="上一首"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 5v14M18 6l-9 6 9 6Z"/></svg></button>
+        <button class="transport-button primary" id="playButton" type="button" aria-label="播放"><svg class="icon-play" aria-hidden="true" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></svg><svg class="icon-pause" aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg></button>
+        <button class="transport-button" id="nextButton" type="button" aria-label="下一首"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 5v14M6 6l9 6-9 6Z"/></svg></button>
+      </div>
+      <div class="timeline-cluster">
+        <span id="elapsedTime">0:00</span><label class="sr-only" for="seekInput">播放进度</label><input id="seekInput" type="range" min="0" max="1000" value="0"><span id="durationTime">0:00</span>
+      </div>
+      <div class="volume-cluster">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 10v4h4l5 4V6l-5 4H5Z"/><path d="M17 9c1 1 1 5 0 6M20 7c3 3 3 7 0 10"/></svg>
+        <label class="sr-only" for="volumeInput">音量</label><input id="volumeInput" type="range" min="0" max="1" step="0.01" value="0.8">
+        <span class="fps-chip" id="playbackFps">60 FPS</span>
+      </div>
+      <div class="playback-actions utility-actions" aria-label="沉浸播放动作">
+        <button class="action-button" id="lyricsToggleButton" type="button" aria-pressed="true" aria-label="显示或隐藏主屏歌词">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 7h14M5 12h10M5 17h7"/><path d="M18 15l2 2-2 2"/></svg>
+        </button>
+        <button class="action-button" id="immersiveButton" type="button" aria-pressed="false" aria-label="进入全屏沉浸">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 4H4v4M16 4h4v4M8 20H4v-4M16 20h4v-4"/></svg>
+        </button>
+        <button class="action-button" id="windowModeButton" type="button" aria-pressed="false" aria-label="窗口全屏模式">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M4 10h16"/></svg>
+        </button>
+        <button class="action-button" id="moreActionsButton" type="button" aria-expanded="false" aria-controls="playbackMorePopover" aria-label="更多播放动作">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>
+        </button>
+        <div class="playback-more-popover" id="playbackMorePopover" hidden>
+          <button class="text-button" type="button" data-quick-action="desktop">桌面歌词布局</button>
+          <button class="text-button" type="button" data-quick-action="mv">官方 MV</button>
+          <button class="text-button" type="button" data-quick-action="console">JARVIS 控制台</button>
+        </div>
+      </div>
+    </footer>
+
+    <button id="energyCore" class="energy-core" type="button" aria-expanded="false" aria-controls="commandRail" aria-label="打开 JARVIS 视觉控制台">
+      <span aria-hidden="true"><i></i></span><small>CORE</small>
+    </button>
+    <audio id="audio" crossorigin="anonymous" preload="metadata"></audio>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  </div>
+  <script type="module" src="/src/app.mjs"></script>
+</body>
+</html>

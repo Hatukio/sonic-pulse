@@ -1,0 +1,70 @@
+{
+  "name": "sonic-pulse",
+  "version": "1.0.0",
+  "description": "音乐可视化播放器",
+  "author": "Sonic Pulse",
+  "main": "main.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "electron .",
+    "test": "node --test tests/*.test.js tests/*.test.mjs",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "NeteaseCloudMusicApi": "^4.21.1",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.sonicpulse.app",
+    "productName": "Sonic Pulse",
+    "mac": {
+      "category": "public.app-category.music",
+      "icon": "build/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Sonic Pulse"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "desktop-preload.js",
+      "desktop-lyrics-state.js",
+      "server-health.js",
+      "server.js",
+      "server/providers/**/*",
+      "public/**/*",
+      "node_modules/**/*",
+      "!node_modules/electron/**/*",
+      "!node_modules/electron-builder/**/*"
+    ]
+  }
+}
