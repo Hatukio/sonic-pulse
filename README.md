@@ -4,7 +4,7 @@
 
 ## 下载与安装
 
-普通使用不需要打开终端。请在 GitHub Releases 下载对应系统的安装包：
+普通使用不需要打开终端。请在 [GitHub Releases](https://github.com/Hatukio/sonic-pulse/releases/latest) 下载对应系统的安装包：
 
 - Windows：`Sonic Pulse Setup 1.0.0.exe`
 - macOS Intel：`Sonic Pulse-1.0.0.dmg`
